@@ -16,6 +16,7 @@
   * [Blaxel](providers/blaxel.md)
   * [Brezel](providers/brezel.md)
   * [Buddy](providers/buddy.md)
+  * [Cathedral](providers/cathedral.md)
   * [Cloud Run](providers/cloud-run.md)
   * [Cloudflare](providers/cloudflare.md)
   * [CodeSandbox](providers/codesandbox.md)

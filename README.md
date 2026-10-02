@@ -81,6 +81,7 @@ Install provider packages and pass instances into `compute.setConfig`:
 | **Beam** | `BEAM_TOKEN`, `BEAM_WORKSPACE_ID` | Serverless cloud sandboxes |
 | **Blaxel** | `BL_API_KEY`, `BL_WORKSPACE` | Agent sandboxes with custom images |
 | **Brezel** | `BREZEL_API_KEY`, `BREZEL_API_URL`, `BREZEL_PROJECT_ID`, `BREZEL_ENVIRONMENT_REVISION` | Self-hosted Firecracker sandboxes |
+| **Cathedral** | `CATHEDRAL_API_KEY` | Sandboxes for evals, graders and agents, with exec, files, snapshots and forks |
 | **Cloud Run** | `CLOUD_RUN_SANDBOX_URL`, `CLOUD_RUN_SANDBOX_SECRET` | Google Cloud Run sandboxes |
 | **Cloudflare** | `CLOUDFLARE_SANDBOX_URL`, `CLOUDFLARE_SANDBOX_API_KEY` | Edge computing |
 | **CodeSandbox** | `CSB_API_KEY` | Collaborative development |
@@ -298,6 +299,7 @@ npm install @computesdk/beam             # Beam provider
 npm install @computesdk/blaxel           # Blaxel provider
 npm install @computesdk/brezel           # Brezel provider
 npm install @computesdk/buddy            # Buddy provider
+npm install @computesdk/cathedral        # Cathedral provider
 npm install @computesdk/cloud-run        # Google Cloud Run provider
 npm install @computesdk/cloudflare       # Cloudflare provider
 npm install @computesdk/codesandbox      # CodeSandbox provider
@@ -343,6 +345,7 @@ See individual provider READMEs for details:
 - **[@computesdk/blaxel](./packages/blaxel)** - Agent sandboxes with custom images
 - **[@computesdk/brezel](./packages/brezel)** - Self-hosted Firecracker sandboxes with immutable environments
 - **[@computesdk/buddy](./packages/buddy)** - Persistent Ubuntu sandboxes for agents, booting in milliseconds, with preview URLs and snapshots
+- **[@computesdk/cathedral](./packages/cathedral)** - Sandboxes for evals, graders and agents, with snapshots and forks
 - **[@computesdk/cloud-run](./packages/cloud-run)** - Google Cloud Run sandboxes
 - **[@computesdk/cloudflare](./packages/cloudflare)** - Edge computing sandboxes
 - **[@computesdk/codesandbox](./packages/codesandbox)** - Collaborative development
