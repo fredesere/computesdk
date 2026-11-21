@@ -74,6 +74,8 @@ interface CathedralConfig {
   teamId?: string;
   /** How long create() waits for the sandbox to run. Default 10 minutes */
   createTimeoutMs?: number;
+  /** baseUrl is a Cathedral front door: no catalog read, sealed creates, commands as argv. Falls back to CATHEDRAL_FRONT_DOOR=1. Default off */
+  frontDoor?: boolean;
 }
 ```
 

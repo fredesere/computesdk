@@ -232,6 +232,69 @@ describe('create', () => {
   });
 });
 
+describe('front-door mode', () => {
+  const fetches = () => vi.mocked(fetch).mock.calls.length;
+
+  it('creates with exactly one request: no catalog read, no spend ceiling, sealed placement', async () => {
+    route('POST', '/v1/sandboxes', () => ({ status: 201, body: sandboxDoc('running') }));
+    const prev = process.env.CATHEDRAL_FRONT_DOOR;
+    try {
+      // Once from the config, once from CATHEDRAL_FRONT_DOOR=1.
+      await provider({ frontDoor: true, labels: { job: 'bench' } }).sandbox.create({ timeout: 600_000 });
+      process.env.CATHEDRAL_FRONT_DOOR = '1';
+      await provider({ labels: { job: 'bench' } }).sandbox.create({ timeout: 600_000 });
+    } finally {
+      if (prev === undefined) delete process.env.CATHEDRAL_FRONT_DOOR;
+      else process.env.CATHEDRAL_FRONT_DOOR = prev;
+    }
+    expect(fetches()).toBe(2);
+    for (const create of calls) {
+      expect(create.method).toBe('POST');
+      expect(create.url.pathname).toBe('/v1/sandboxes');
+      expect(create.headers['User-Agent']).toBe(PACKAGE_USER_AGENT);
+      expect(create.body).toEqual({
+        template: 'node-22',
+        lifetime_seconds: 600,
+        network: 'deny_all',
+        labels: { job: 'bench' },
+        sealed: true,
+      });
+    }
+  });
+
+  it('sends a command as ["bash", "-c", command] in one request', async () => {
+    route('POST', '/v1/sandboxes', () => ({ status: 201, body: sandboxDoc('running') }));
+    route('POST', `/v1/sandboxes/${SANDBOX_ID}/exec`, () => ({
+      status: 200,
+      body: { exit_code: 0, stdout: 'v22.11.0\n', stderr: '', duration_ms: 12 },
+    }));
+    route('POST', `/v1/sandboxes/${SANDBOX_ID}/execs`, () => ({ status: 202, body: { exec_id: 'e1', state: 'running' } }));
+    const sandbox = await provider({ frontDoor: true }).sandbox.create();
+    const before = fetches();
+    const result = await sandbox.runCommand('node -v');
+    expect(fetches() - before).toBe(1);
+    expect(result).toMatchObject({ stdout: 'v22.11.0\n', exitCode: 0 });
+    const exec = calls.find((c) => c.url.pathname.endsWith('/exec'))!;
+    expect(exec.body).toEqual({ command: ['bash', '-c', 'node -v'], timeout_seconds: 45 });
+
+    await sandbox.runCommand('sleep 100', { background: true });
+    const start = calls.find((c) => c.url.pathname.endsWith('/execs'))!;
+    expect((start.body as { command: unknown }).command).toEqual(['bash', '-c', 'sleep 100']);
+  });
+
+  it('throws before any request when no template or image is given', async () => {
+    const prev = process.env.CATHEDRAL_TEMPLATE;
+    delete process.env.CATHEDRAL_TEMPLATE;
+    try {
+      const p = cathedral({ apiKey: API_KEY, frontDoor: true });
+      await expect(p.sandbox.create()).rejects.toThrow(/templateId/);
+    } finally {
+      if (prev !== undefined) process.env.CATHEDRAL_TEMPLATE = prev;
+    }
+    expect(fetches()).toBe(0);
+  });
+});
+
 describe('sandbox operations', () => {
   async function running(extra: Record<string, unknown> = {}) {
     route('POST', '/v1/sandboxes', () => ({ status: 202, body: sandboxDoc('running') }));

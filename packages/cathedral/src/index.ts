@@ -79,6 +79,8 @@ export interface CathedralSandbox {
   /** Lifetime the sandbox was created with, in ms. */
   timeoutMs: number;
   client: CathedralClient;
+  /** Commands go to a front door, which takes argv lists only (see `CathedralConfig.frontDoor`). */
+  frontDoor: boolean;
 }
 
 export interface CathedralSnapshot {
@@ -120,6 +122,14 @@ export interface CathedralConfig extends CathedralClientOptions {
   createTimeoutMs?: number;
   /** Poll interval while a sandbox is `creating`. Default 200 ms. */
   pollIntervalMs?: number;
+  /**
+   * Talk to a Cathedral front door (the regional broker) instead of the central API: `baseUrl`
+   * (or CATHEDRAL_BASE_URL) is the front door. Creates name a template or image, skip the
+   * catalog read, carry no spend ceiling (the front door enforces the key's allowance) and ask
+   * for sealed placement; commands are sent as `["bash", "-c", command]`, since a front door
+   * refuses a shell string. Falls back to CATHEDRAL_FRONT_DOOR=1. Default off.
+   */
+  frontDoor?: boolean;
 }
 
 /** What `create` needs from `GET /v1/sandboxes/catalog`: the default size and each sealed size's rate. */
@@ -156,6 +166,11 @@ const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 function getClient(config: ConfigWithClient): CathedralClient {
   if (!config.__client) config.__client = new CathedralClient(config);
   return config.__client;
+}
+
+function frontDoorOn(config: CathedralConfig): boolean {
+  if (config.frontDoor !== undefined) return config.frontDoor;
+  return typeof process !== 'undefined' && process.env?.CATHEDRAL_FRONT_DOOR === '1';
 }
 
 function sandboxPath(id: string, suffix = ''): string {
@@ -287,7 +302,8 @@ async function runCommand(
 ): Promise<CommandResult> {
   const started = Date.now();
   const client = sandbox.client;
-  const body: Record<string, unknown> = { command };
+  // A front door takes argv lists only; wrap the string the way the central API does.
+  const body: Record<string, unknown> = { command: sandbox.frontDoor ? ['bash', '-c', command] : command };
   if (options?.cwd) body.cwd = options.cwd;
   const env = execEnv(sandbox, options);
   if (env) body.env = env;
@@ -393,8 +409,14 @@ function toSnapshot(raw: CathedralSnapshotResponse): CathedralSnapshot {
   };
 }
 
-function handle(client: CathedralClient, info: CathedralSandboxResponse, envs: Record<string, string>, timeoutMs: number): CathedralSandbox {
-  return { id: info.id, info, envs, timeoutMs, client };
+function handle(
+  config: CathedralConfig,
+  client: CathedralClient,
+  info: CathedralSandboxResponse,
+  envs: Record<string, string>,
+  timeoutMs: number,
+): CathedralSandbox {
+  return { id: info.id, info, envs, timeoutMs, client, frontDoor: frontDoorOn(config) };
 }
 
 const quoted = (path: string) => `"${escapeShellArg(path)}"`;
@@ -527,7 +549,19 @@ export const cathedral = defineProvider<CathedralSandbox, ConfigWithClient, neve
           network: rest.network ?? config.network ?? 'deny_all',
         };
         let hourlyRate: number | undefined;
-        if (snapshotId) {
+        const frontDoor = frontDoorOn(config);
+        if (frontDoor) {
+          // The front door creates from a named template or an image and answers 201 running:
+          // no catalog read, no spend ceiling, and sealed placement for every create.
+          if (snapshotId) throw new Error('Cathedral front-door mode does not create from snapshotId; pass templateId or image.');
+          const template =
+            templateId || config.template || (typeof process !== 'undefined' ? process.env?.CATHEDRAL_TEMPLATE : undefined);
+          if (rest.imageId) body.image_id = rest.imageId;
+          else if (rest.image) body.image = rest.image;
+          else if (template) body.template = template;
+          else throw new Error('Cathedral front-door mode needs a template: pass templateId (for example node-22), or set CATHEDRAL_TEMPLATE.');
+          body.sealed = true;
+        } else if (snapshotId) {
           // A fork keeps its source's size, rate and network modes.
           body.snapshot_id = snapshotId;
         } else {
@@ -551,9 +585,10 @@ export const cathedral = defineProvider<CathedralSandbox, ConfigWithClient, neve
           if (rest.imageId) body.image_id = rest.imageId;
           else if (rest.image) body.image = rest.image;
         }
-        body.max_spend_usd = maxSpendUsd(config, hourlyRate, lifetimeS);
-
-        if (config.egressAllowlist?.length) body.egress_allowlist = config.egressAllowlist;
+        if (!frontDoor) {
+          body.max_spend_usd = maxSpendUsd(config, hourlyRate, lifetimeS);
+          if (config.egressAllowlist?.length) body.egress_allowlist = config.egressAllowlist;
+        }
         const labels = toLabels(config.labels, metadata as Record<string, unknown> | undefined, name ? { name } : undefined);
         if (labels) body.labels = labels;
 
@@ -589,7 +624,7 @@ export const cathedral = defineProvider<CathedralSandbox, ConfigWithClient, neve
           Math.max(0, createDeadline - Date.now()),
           config.pollIntervalMs ?? 200,
         );
-        const sandbox = handle(client, running, { ...(envs ?? {}) }, timeoutMs);
+        const sandbox = handle(config, client, running, { ...(envs ?? {}) }, timeoutMs);
         return { sandbox, sandboxId: sandbox.id };
       },
 
@@ -599,7 +634,7 @@ export const cathedral = defineProvider<CathedralSandbox, ConfigWithClient, neve
           allow: [404, 422],
         });
         if (status === 404 || status === 422) return null;
-        const sandbox = handle(client, body, {}, config.timeout ?? DEFAULT_LIFETIME_MS);
+        const sandbox = handle(config, client, body, {}, config.timeout ?? DEFAULT_LIFETIME_MS);
         return { sandbox, sandboxId: sandbox.id };
       },
 
@@ -613,7 +648,7 @@ export const cathedral = defineProvider<CathedralSandbox, ConfigWithClient, neve
             { query: { state: 'running', limit: 100, offset } },
           );
           for (const info of body.sandboxes ?? []) {
-            out.push({ sandbox: handle(client, info, {}, config.timeout ?? DEFAULT_LIFETIME_MS), sandboxId: info.id });
+            out.push({ sandbox: handle(config, client, info, {}, config.timeout ?? DEFAULT_LIFETIME_MS), sandboxId: info.id });
           }
           if (!body.has_more) break;
         }
